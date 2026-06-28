@@ -1,7 +1,8 @@
 #include "../include/Server.h"
-
+#include "../include/HttpRequest.h"  // ← ADD THIS LINE
 #include <iostream>
 #include <unistd.h>
+// ... other includes ...
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <cstring>
@@ -78,100 +79,105 @@ std::string readFile(const std::string& path)
 
 void Server::handleClient(int clientSocket)
 {
-
-
     std::cout
     << "Thread ID: "
     << std::this_thread::get_id()
     << "\n";
-    char buffer[4096] = {0};
-
-    int bytesReceived =
-        recv(clientSocket,
-             buffer,
-             sizeof(buffer),
-             0);
-
-    if(bytesReceived <= 0)
-    {
+    
+    // FIX: Loop until complete request received
+    std::string request;
+    char buf[1024];
+    int n;
+    while((n = recv(clientSocket, buf, sizeof(buf), 0)) > 0) {
+        request.append(buf, n);
+        if(request.find("\r\n\r\n") != std::string::npos) break;
+    }
+    
+    if(request.empty()) {
         close(clientSocket);
         return;
     }
-
-    std::string request(buffer);
-    requestCount++;
+requestCount++;
     Logger::log(request);
-
     std::cout << "\n====== REQUEST ======\n";
     std::cout << request << "\n";
-
-    std::string response;
-
     
-
- if(request.find("/style.css") != std::string::npos)
-{
-    std::string css =
-        readFile("public/style.css");
-
-    response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/css\r\n"
-        "\r\n" +
-        css;
-}
-else if(request.find("/api/status") != std::string::npos)
-{
-    response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: application/json\r\n"
-        "\r\n"
-        "{"
-        "\"status\":\"running\","
-        "\"requests_served\":" +
-        std::to_string(requestCount.load()) +
-        ","
-        "\"worker_threads\":4"
-        "}";
-}
-else if(request.find("/hello") != std::string::npos)
-{
-    response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/plain\r\n"
-        "\r\n"
-        "Hello bro from multithreaded C++ server!";
-}
-else if(request.find("/ ") != std::string::npos)
-{
-    std::string html =
-        readFile("public/index.html");
-
-    response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
-        "\r\n" +
-        html;
-}
+    // FIX: Actually parse the request
+    HttpRequest req;
+    req.parse(request);
+    
+    std::string response;
+    
+    if(req.path == "/style.css")
+    {
+        std::string css = readFile("public/style.css");
+        response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/css\r\n"
+            "Content-Length: " + std::to_string(css.size()) + "\r\n"
+            "\r\n" + css;
+    }
+    else if(req.path == "/api/status")
+    {
+        std::string body =
+            "{\"status\":\"running\","
+            "\"requests_served\":" +
+            std::to_string(requestCount.load()) +
+            ",\"worker_threads\":4}";
+        response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: " + std::to_string(body.size()) + "\r\n"
+            "\r\n" + body;
+    }
+    else if(req.path == "/hello")
+    {
+        std::string body = "Hello bro from multithreaded C++ server!";
+        response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: " + std::to_string(body.size()) + "\r\n"
+            "\r\n" + body;
+    }
+    else if(req.path == "/")
+    {
+        std::string html = readFile("public/index.html");
+        response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: " + std::to_string(html.size()) + "\r\n"
+            "\r\n" + html;
+    }
     else
     {
+        std::string body = "404 - Route Not Found";
         response =
             "HTTP/1.1 404 Not Found\r\n"
             "Content-Type: text/plain\r\n"
-            "\r\n"
-            "404 - Route Not Found";
+            "Content-Length: " + std::to_string(body.size()) + "\r\n"
+            "\r\n" + body;
     }
 
-    send(
-        clientSocket,
-        response.c_str(),
-        response.size(),
-        0
-    );
-
+// FIX: Handle partial sends
+    size_t totalSent = 0;
+    const char* data = response.c_str();
+    size_t remaining = response.size();
+    
+    while(totalSent < remaining) {
+        int sent = send(
+            clientSocket,
+            data + totalSent,
+            remaining - totalSent,
+            0
+        );
+        if(sent < 0) {
+            break; // error occurred
+        }
+        totalSent += sent;
+    }
+    
     close(clientSocket);
 }
-
 void Server::run()
 {
     while(true)

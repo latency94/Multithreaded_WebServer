@@ -6,19 +6,18 @@
 
     static std::mutex logMutex;
 
-    void Logger::log(const std::string& msg)
-    {
-        std::lock_guard<std::mutex> lock(logMutex);
-
-        std::ofstream file(
-            "logs/server.log",
-            std::ios::app
-        );
-
-        time_t now = time(nullptr);
-
-        file << ctime(&now)
-            << " "
-            << msg
-            << "\n";
-    }
+  void Logger::log(const std::string& msg)
+{
+    std::lock_guard<std::mutex> lock(logMutex);
+    std::ofstream file(
+        "logs/server.log",
+        std::ios::app
+    );
+    time_t now = time(nullptr);
+    std::string timeStr = ctime(&now);
+    timeStr.pop_back(); // FIX: Remove ctime's trailing \n
+    file << timeStr
+        << " "
+        << msg
+        << "\n";
+}
